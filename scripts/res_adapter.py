@@ -166,23 +166,32 @@ class ResAdapterScript(scripts.Script):
             with gr.Row():
                 use_resadapter = gr.Checkbox(label="Enable Res-Adapter", value=False, visible=True, elem_classes=["res_adapter_enabled"])
 
-        return [use_resadapter]
+            with gr.Row():
+                res_version = gr.Radio(label="Select Res-Adapter version",
+                    choices=[("v1 sd1.5", "v1_sd1.5"), ("v2 sd1.5", "v2_sd1.5"), ("v1 sdxl", "v1_sdxl"), ("v2 sdxl", "v2_sdxl")],
+                    value="v2_sd1.5",
+                    interactive=True)
+
+        return [use_resadapter, res_version]
 
 
-    def before_process(self, p, enabled, *args_):
+    def before_process(self, p, enabled, version, *args_):
         if not enabled:
             if shared.sd_model is not None and getattr(shared.sd_model, "orig_norm_state_dict", None) is not None:
                 print("Restore original norm state_dict ...")
                 self.apply_norm_state_dict(shared.sd_model, shared.sd_model.orig_norm_state_dict)
-                shared.sd_model.fix_res_adapter = None
+                shared.sd_model.fix_resadapter = None
+                shared.sd_model.resadapter_version = None
 
             return
 
-        if shared.sd_model is not None and getattr(shared.sd_model, "fix_res_adapter", None) is not None:
-            return
+        if shared.sd_model is not None and getattr(shared.sd_model, "fix_resadapter", None) is not None:
+            if shared.sd_model.resadapter_version == version:
+                return
 
         norm_state_dict = {}
-        norm_path = os.path.join(scriptdir, "models", "res_adapter", "resadapter_v2_sd1.5", self.NORM_WEIGHTS_NAME)
+        print(f"Load Res-Adapter version {version}...")
+        norm_path = os.path.join(scriptdir, "models", "res_adapter", f"resadapter_{version}", self.NORM_WEIGHTS_NAME)
         try:
             unet_state_dict = {}
             with safe_open(norm_path, framework="pt", device="cpu") as f:
@@ -196,7 +205,9 @@ class ResAdapterScript(scripts.Script):
         if len(norm_state_dict) > 0 and shared.sd_model is not None:
             orig_state_dict = self.apply_norm_state_dict(shared.sd_model, norm_state_dict)
             # store original norm_state_dict
-            shared.sd_model.orig_norm_state_dict = orig_state_dict.copy()
+            if getattr(shared.sd_model, "orig_norm_state_dict", None) is None:
+                shared.sd_model.orig_norm_state_dict = orig_state_dict.copy()
+            shared.sd_model.resadapter_version = version
 
 
     def apply_norm_state_dict(self, sd_model, norm_state_dict):
@@ -258,8 +269,8 @@ class ResAdapterScript(scripts.Script):
             if unet_updated > 0:
                 print(" - \033[92mUNet res_adapter blocks have been successfully updated\033[0m")
 
-                # add fix_res_adapter attribute
-                sd_model.fix_res_adapter = True
+                # add fix_resadapter attribute
+                sd_model.fix_resadapter = True
 
             # restore to gpu
             send_model_to_device(sd_model)
