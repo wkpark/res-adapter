@@ -178,10 +178,11 @@ class ResAdapterScript(scripts.Script):
     def before_process(self, p, enabled, version, *args_):
         if not enabled:
             if shared.sd_model is not None and getattr(shared.sd_model, "orig_norm_state_dict", None) is not None:
-                print("Restore original norm state_dict ...")
-                self.apply_norm_state_dict(shared.sd_model, shared.sd_model.orig_norm_state_dict)
-                shared.sd_model.fix_resadapter = None
-                shared.sd_model.resadapter_version = None
+                if getattr(shared.sd_model, "fix_resadapter", None) is not None:
+                    print("Restore original norm state_dict ...")
+                    self.apply_norm_state_dict(shared.sd_model, shared.sd_model.orig_norm_state_dict)
+                    shared.sd_model.fix_resadapter = None
+                    shared.sd_model.resadapter_version = None
 
             return
 
