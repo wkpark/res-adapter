@@ -281,4 +281,6 @@ class ResAdapterScript(scripts.Script):
             if sd_unet is not None:
                 sd_unet.apply_unet()
 
+            shared.state.textinfo = None
+
             return orig_state_dict
