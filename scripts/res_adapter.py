@@ -171,6 +171,11 @@ class ResAdapterScript(scripts.Script):
 
     def before_process(self, p, enabled, *args_):
         if not enabled:
+            if shared.sd_model is not None and getattr(shared.sd_model, "orig_norm_state_dict", None) is not None:
+                print("Restore original norm state_dict ...")
+                self.apply_norm_state_dict(shared.sd_model, shared.sd_model.orig_norm_state_dict)
+                shared.sd_model.fix_res_adapter = None
+
             return
 
         if shared.sd_model is not None and getattr(shared.sd_model, "fix_res_adapter", None) is not None:
@@ -189,6 +194,15 @@ class ResAdapterScript(scripts.Script):
             print("There is no normalization safetensors, we can only load lora safetensors for resolution interpolation.")
 
         if len(norm_state_dict) > 0 and shared.sd_model is not None:
+            orig_state_dict = self.apply_norm_state_dict(shared.sd_model, norm_state_dict)
+            # store original norm_state_dict
+            shared.sd_model.orig_norm_state_dict = orig_state_dict.copy()
+
+
+    def apply_norm_state_dict(self, sd_model, norm_state_dict):
+        orig_state_dict = {}
+
+        if len(norm_state_dict) > 0 and sd_model is not None:
             norm_changed_blocks = set()
             for k in norm_state_dict.keys():
                 tmp = k.split(".")
@@ -217,13 +231,13 @@ class ResAdapterScript(scripts.Script):
                             break
 
             # get unet_blocks_map
-            unet_map = unet_blocks_map(shared.sd_model.model.diffusion_model, shared.sd_model.is_sdxl)
+            unet_map = unet_blocks_map(sd_model.model.diffusion_model, sd_model.is_sdxl)
 
             # to cpu ram
             if sd_unet is not None:
                 sd_unet.apply_unet("None")
-            send_model_to_cpu(shared.sd_model)
-            sd_hijack.model_hijack.undo_hijack(shared.sd_model)
+            send_model_to_cpu(sd_model)
+            sd_hijack.model_hijack.undo_hijack(sd_model)
 
             # partial update unet blocks state_dict
             unet_updated = 0
@@ -236,6 +250,7 @@ class ResAdapterScript(scripts.Script):
                 for k in weight_changed[s]:
                     # remove block prefix, 'model.diffusion_model.input_blocks.0.' will be removed
                     key = k[len(prefix):]
+                    orig_state_dict[k] = unet_dict[key].clone().detach()
                     unet_dict[key] = norm_state_dict[k]
                 unet_map[s].load_state_dict(unet_dict)
                 unet_updated += 1
@@ -244,12 +259,14 @@ class ResAdapterScript(scripts.Script):
                 print(" - \033[92mUNet res_adapter blocks have been successfully updated\033[0m")
 
                 # add fix_res_adapter attribute
-                shared.sd_model.fix_res_adapter = True
+                sd_model.fix_res_adapter = True
 
             # restore to gpu
-            send_model_to_device(shared.sd_model)
-            sd_hijack.model_hijack.hijack(shared.sd_model)
+            send_model_to_device(sd_model)
+            sd_hijack.model_hijack.hijack(sd_model)
 
-            sd_models.model_data.set_sd_model(shared.sd_model)
+            sd_models.model_data.set_sd_model(sd_model)
             if sd_unet is not None:
                 sd_unet.apply_unet()
+
+            return orig_state_dict
